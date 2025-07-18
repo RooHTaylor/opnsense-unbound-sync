@@ -1,13 +1,16 @@
-#/usr/bin/env python3
+#!/usr/bin/env python3
+# vim: set tw=0
 
 import requests
 import json
+import subprocess
 import pprint
 
-debug = True
+debug = False
 
 api_key_file = '.apikey'
-opnsense_url = 'https://opn.m.h.sawknerd.net'
+overrides_file = '/etc/unbound/unbound.conf.d/host_overrides.conf'
+opnsense_url = 'https://opnsense.example.com'
 
 api_key = {}
 
@@ -45,15 +48,64 @@ r = requests.get(endpointurl,
 if debug:
     pprint.pprint(r)
 
-response = ""
+settings = ""
 
 if r.status_code == 200:
-    response = json.loads(r.text)
+    settings = json.loads(r.text)
 
     if debug:
-        pprint.pprint(response)
+        pprint.pprint(settings)
 
 else:
-    print('Connection / Authentication issue, response received:')
-    print(r.text)
+    raise Exception("Connection / Authentication issue, response received")
 
+outfile = '''server:
+local-zone: "example.com" transparent
+
+# Localhost
+local-data-ptr: "127.0.0.1 localhost"
+local-data: "localhost A 127.0.0.1"
+local-data: "localhost.example.com A 127.0.0.1"
+local-data-ptr: "::1 localhost"
+local-data: "localhost AAAA ::1"
+local-data: "localhost.example.com AAAA ::1"
+
+# From OPNSense overrides
+'''
+
+for hostid in settings['unbound']['hosts']['host']:
+    if settings['unbound']['hosts']['host'][hostid]['enabled'] != '1' or settings['unbound']['hosts']['host'][hostid]['rr']['MX']['selected'] == '1':
+        pprint.pprint(settings['unbound']['hosts']['host'][hostid]['enabled'])
+        continue;
+
+    ptrline = 'local-data-ptr: "' + settings['unbound']['hosts']['host'][hostid]['server'] + ' ' + settings['unbound']['hosts']['host'][hostid]['hostname'] + '.' + settings['unbound']['hosts']['host'][hostid]['domain'] + "\"\n"
+
+    dataline = 'local-data: "' + settings['unbound']['hosts']['host'][hostid]['hostname'] + '.' + settings['unbound']['hosts']['host'][hostid]['domain'] + ' ' + settings['unbound']['hosts']['host'][hostid]['ttl'] + ' IN '
+    if settings['unbound']['hosts']['host'][hostid]['rr']['A']['selected'] == 1:
+        dataline += 'A '
+    else:
+        dataline += 'AAAA '
+    dataline += settings['unbound']['hosts']['host'][hostid]['server'] + "\"\n"
+
+    outfile += ptrline + dataline
+
+    for aliasid in settings['unbound']['aliases']['alias']:
+        if settings['unbound']['aliases']['alias'][aliasid]['enabled'] != 1 or settings['unbound']['aliases']['alias'][aliasid]['host'][hostid]['selected'] != 1:
+            continue;
+
+        aliasdataline += 'local-data: "' + settings['unbound']['aliases']['alias'][aliasid]['hostname'] + '.' + settings['unbound']['aliases']['alias'][aliasid]['domain'] + ' ' + settings['unbound']['hosts']['host'][hostid]['ttl'] + ' IN '
+        if settings['unbound']['hosts']['host'][hostid]['rr']['A']['selected'] == 1:
+            aliasdataline += 'A '
+        else:
+            aliasdataline += 'AAAA '
+        aliasdataline += settings['unbound']['hosts']['host'][hostid]['server'] + "\"\n"
+
+        outfile += aliasdataline
+
+if debug:
+    print(outfile)
+
+with open(overrides_file, 'w') as oridefile:
+    oridefile.write(outfile)
+
+subprocess.run(['sudo', 'systemctl', 'reload', 'unbound'])
