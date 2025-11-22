@@ -73,12 +73,19 @@ local-data: "localhost.example.com AAAA ::1"
 # From OPNSense overrides
 '''
 
+ptrs = ['127.0.0.1', '::1']
+
 for hostid in settings['unbound']['hosts']['host']:
-    if settings['unbound']['hosts']['host'][hostid]['enabled'] != '1' or settings['unbound']['hosts']['host'][hostid]['rr']['MX']['selected'] == '1':
-        pprint.pprint(settings['unbound']['hosts']['host'][hostid]['enabled'])
+    # !!!! enabled is a string but selected is an int !!!!
+    if settings['unbound']['hosts']['host'][hostid]['enabled'] != '1' or settings['unbound']['hosts']['host'][hostid]['rr']['MX']['selected'] == 1:
         continue;
 
-    ptrline = 'local-data-ptr: "' + settings['unbound']['hosts']['host'][hostid]['server'] + ' ' + settings['unbound']['hosts']['host'][hostid]['hostname'] + '.' + settings['unbound']['hosts']['host'][hostid]['domain'] + "\"\n"
+    # Only add PTR records once.
+    if settings['unbound']['hosts']['host'][hostid]['server'] not in ptrs:
+        ptrline = 'local-data-ptr: "' + settings['unbound']['hosts']['host'][hostid]['server'] + ' ' + settings['unbound']['hosts']['host'][hostid]['hostname'] + '.' + settings['unbound']['hosts']['host'][hostid]['domain'] + "\"\n"
+        ptrs.append(settings['unbound']['hosts']['host'][hostid]['server'])
+    else:
+        ptrline = ''
 
     dataline = 'local-data: "' + settings['unbound']['hosts']['host'][hostid]['hostname'] + '.' + settings['unbound']['hosts']['host'][hostid]['domain'] + ' ' + settings['unbound']['hosts']['host'][hostid]['ttl'] + ' IN '
     if settings['unbound']['hosts']['host'][hostid]['rr']['A']['selected'] == 1:
@@ -90,7 +97,8 @@ for hostid in settings['unbound']['hosts']['host']:
     outfile += ptrline + dataline
 
     for aliasid in settings['unbound']['aliases']['alias']:
-        if settings['unbound']['aliases']['alias'][aliasid]['enabled'] != 1 or settings['unbound']['aliases']['alias'][aliasid]['host'][hostid]['selected'] != 1:
+        # !!!! enabled is a string but selected is an int !!!!
+        if settings['unbound']['aliases']['alias'][aliasid]['enabled'] != '1' or settings['unbound']['aliases']['alias'][aliasid]['host'][hostid]['selected'] != 1:
             continue;
 
         aliasdataline += 'local-data: "' + settings['unbound']['aliases']['alias'][aliasid]['hostname'] + '.' + settings['unbound']['aliases']['alias'][aliasid]['domain'] + ' ' + settings['unbound']['hosts']['host'][hostid]['ttl'] + ' IN '
